@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/authorization/usecase"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/metrics"
-	"github.com/go-park-mail-ru/2023_2_Vkladyshi/middleware"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/pkg/requests"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -53,12 +52,12 @@ func GetApi(c *usecase.Core, l *slog.Logger) *API {
 	}
 
 	api.mx.Handle("/metrics", promhttp.Handler())
-	api.mx.Handle("/signin", middleware.CollectMetrics(http.HandlerFunc(api.Signin), api.lg, api.mt))
-	api.mx.Handle("/signup", middleware.CollectMetrics(http.HandlerFunc(api.Signup), api.lg, api.mt))
-	api.mx.Handle("/logout", middleware.CollectMetrics(http.HandlerFunc(api.LogoutSession), api.lg, api.mt))
-	api.mx.Handle("/authcheck", middleware.CollectMetrics(http.HandlerFunc(api.AuthAccept), api.lg, api.mt))
-	api.mx.Handle("/api/v1/csrf", middleware.CollectMetrics(http.HandlerFunc(api.GetCsrfToken), api.lg, api.mt))
-	api.mx.Handle("/api/v1/settings", middleware.CollectMetrics(http.HandlerFunc(api.Profile), api.lg, api.mt))
+	api.mx.HandleFunc("/signin", api.Signin)
+	api.mx.HandleFunc("/signup", api.Signup)
+	api.mx.HandleFunc("/logout", api.LogoutSession)
+	api.mx.HandleFunc("/authcheck", api.AuthAccept)
+	api.mx.HandleFunc("/api/v1/csrf", api.GetCsrfToken)
+	api.mx.HandleFunc("/api/v1/settings", api.Profile)
 
 	return api
 }
@@ -66,19 +65,19 @@ func GetApi(c *usecase.Core, l *slog.Logger) *API {
 func (a *API) LogoutSession(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 
+	start := time.Now()
+
 	session, err := r.Cookie("session_id")
 	if err == http.ErrNoCookie {
 		response.Status = http.StatusUnauthorized
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
 	found, _ := a.core.FindActiveSession(r.Context(), session.Value)
 	if !found {
 		response.Status = http.StatusUnauthorized
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	} else {
 		err := a.core.KillSession(r.Context(), session.Value)
@@ -88,12 +87,13 @@ func (a *API) LogoutSession(w http.ResponseWriter, r *http.Request) {
 		session.Expires = time.Now().AddDate(0, 0, -1)
 		http.SetCookie(w, session)
 	}
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+	requests.SendResponse(w, response, a.lg, a.mt, start)
 }
 
 func (a *API) AuthAccept(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
+
+	start := time.Now()
 	var authorized bool
 
 	session, err := r.Cookie("session_id")
@@ -103,16 +103,14 @@ func (a *API) AuthAccept(w http.ResponseWriter, r *http.Request) {
 
 	if !authorized {
 		response.Status = http.StatusUnauthorized
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 	login, err := a.core.GetUserName(r.Context(), session.Value)
 	if err != nil {
 		a.lg.Error("auth accept error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -120,23 +118,22 @@ func (a *API) AuthAccept(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("auth accept error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
 	authCheckResponse := requests.AuthCheckResponse{Login: login, Role: role}
 	response.Body = authCheckResponse
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+	requests.SendResponse(w, response, a.lg, a.mt, start)
 }
 
 func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
+
+	start := time.Now()
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusMethodNotAllowed
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -146,8 +143,7 @@ func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("X-CSRF-Token", "null")
 		response.Status = http.StatusPreconditionFailed
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -156,15 +152,13 @@ func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
 	if err = json.Unmarshal(body, &request); err != nil {
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -172,14 +166,12 @@ func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Signin error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 	if !found {
 		response.Status = http.StatusUnauthorized
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	} else {
 		sid, session, _ := a.core.CreateSession(r.Context(), user.Login)
@@ -192,16 +184,16 @@ func (a *API) Signin(w http.ResponseWriter, r *http.Request) {
 		}
 		http.SetCookie(w, cookie)
 	}
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+	requests.SendResponse(w, response, a.lg, a.mt, start)
 }
 
 func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
+
+	start := time.Now()
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusMethodNotAllowed
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -211,8 +203,7 @@ func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("X-CSRF-Token", "null")
 		response.Status = http.StatusPreconditionFailed
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -222,8 +213,7 @@ func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Signup error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -231,8 +221,7 @@ func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Signup error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -240,15 +229,13 @@ func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Signup error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
 	if found {
 		response.Status = http.StatusConflict
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -261,12 +248,13 @@ func (a *API) Signup(w http.ResponseWriter, r *http.Request) {
 		a.lg.Error("failed to create user account", "err", err.Error())
 		response.Status = http.StatusBadRequest
 	}
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+	requests.SendResponse(w, response, a.lg, a.mt, start)
 }
 
 func (a *API) GetCsrfToken(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
+
+	start := time.Now()
 
 	csrfToken := r.Header.Get("x-csrf-token")
 
@@ -274,14 +262,12 @@ func (a *API) GetCsrfToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("X-CSRF-Token", "null")
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 	if csrfToken != "" && found {
 		w.Header().Set("X-CSRF-Token", csrfToken)
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -289,24 +275,23 @@ func (a *API) GetCsrfToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("X-CSRF-Token", "null")
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
 	w.Header().Set("X-CSRF-Token", token)
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+	requests.SendResponse(w, response, a.lg, a.mt, start)
 }
 
 func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
+
+	start := time.Now()
 	if r.Method == http.MethodGet {
 		session, err := r.Cookie("session_id")
 		if err == http.ErrNoCookie {
 			response.Status = http.StatusUnauthorized
-			/* trunk-ignore(golangci-lint/staticcheck) */
-			r = requests.SendResponse(r, w, response, a.lg)
+			requests.SendResponse(w, response, a.lg, a.mt, start)
 			return
 		}
 
@@ -318,8 +303,7 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 		profile, err := a.core.GetUserProfile(login)
 		if err != nil {
 			response.Status = http.StatusInternalServerError
-			/* trunk-ignore(golangci-lint/staticcheck) */
-			r = requests.SendResponse(r, w, response, a.lg)
+			requests.SendResponse(w, response, a.lg, a.mt, start)
 			return
 		}
 
@@ -332,22 +316,19 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		response.Body = profileResponse
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusUnauthorized
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 	session, err := r.Cookie("session_id")
 	if err == http.ErrNoCookie {
 		response.Status = http.StatusUnauthorized
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -360,8 +341,7 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 	if err1 != nil {
 		a.lg.Error("Post profile error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -373,8 +353,7 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 	if err != nil && !errors.Is(err, http.ErrMissingFile) {
 		a.lg.Error("Post profile error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -382,8 +361,7 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 
 	if isRepeatPassword {
 		response.Status = http.StatusConflict
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -395,12 +373,10 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			a.lg.Error("Post profile error", "err", err.Error())
 			response.Status = http.StatusInternalServerError
-			/* trunk-ignore(golangci-lint/staticcheck) */
-			r = requests.SendResponse(r, w, response, a.lg)
+			requests.SendResponse(w, response, a.lg, a.mt, start)
 			return
 		}
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -409,8 +385,7 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 	if err != nil && handler != nil && photo != nil {
 		a.lg.Error("Post profile error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -418,8 +393,7 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Post profile error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 	defer filePhoto.Close()
@@ -428,8 +402,7 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Post profile error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -437,10 +410,8 @@ func (a *API) Profile(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Post profile error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg, a.mt, start)
 		return
 	}
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+	requests.SendResponse(w, response, a.lg, a.mt, start)
 }
