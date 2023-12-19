@@ -52,14 +52,14 @@ func (a *API) Comment(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
 	filmId, err := strconv.ParseUint(r.URL.Query().Get("film_id"), 10, 64)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 	page, err := strconv.ParseUint(r.URL.Query().Get("page"), 10, 64)
@@ -75,7 +75,7 @@ func (a *API) Comment(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Comment", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -83,7 +83,7 @@ func (a *API) Comment(w http.ResponseWriter, r *http.Request) {
 
 	response.Body = commentsResponse
 
-	requests.SendResponse(w, response, a.lg, a.mt, start)
+	requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 }
 
 func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
@@ -91,20 +91,20 @@ func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
 	session, err := r.Cookie("session_id")
 	if err == http.ErrNoCookie {
 		response.Status = http.StatusUnauthorized
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 	if err != nil {
 		a.lg.Error("Add comment error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -112,7 +112,7 @@ func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("Add comment error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -121,13 +121,13 @@ func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
 	if err = json.Unmarshal(body, &commentRequest); err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
@@ -138,9 +138,9 @@ func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if found {
 		response.Status = http.StatusNotAcceptable
-		requests.SendResponse(w, response, a.lg, a.mt, start)
+		requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 		return
 	}
 
-	requests.SendResponse(w, response, a.lg, a.mt, start)
+	requests.SendResponse(w, r.URL.Path, response, a.lg, a.mt, start)
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/metrics"
@@ -70,10 +71,18 @@ type CalendarResponse struct {
 	Days       []models.DayItem `json:"days"`
 }
 
-func SendResponse(w http.ResponseWriter, response Response, lg *slog.Logger, mt *metrics.Metrics, start time.Time) {
+func sendMetrics(mt *metrics.Metrics, path string, status int, start time.Time) {
+	end := time.Since(start)
+	mt.Time.WithLabelValues(strconv.Itoa(status), path).Observe(end.Seconds())
+	mt.Hits.WithLabelValues(strconv.Itoa(status), path).Inc()
+}
+
+func SendResponse(w http.ResponseWriter, path string, response Response, lg *slog.Logger, mt *metrics.Metrics, start time.Time) {
 	jsonResponse, err := json.Marshal(response)
+	sendMetrics(mt, path, response.Status, start)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		sendMetrics(mt, path, http.StatusInternalServerError, start)
 		lg.Error("failed to pack json", "err", err.Error())
 		return
 	}
