@@ -9,8 +9,6 @@ import (
 
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/comments/usecase"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/configs"
-	"github.com/go-park-mail-ru/2023_2_Vkladyshi/metrics"
-	"github.com/go-park-mail-ru/2023_2_Vkladyshi/middleware"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/pkg/requests"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -19,23 +17,21 @@ type API struct {
 	core   usecase.ICore
 	lg     *slog.Logger
 	mx     *http.ServeMux
-	mt     *metrics.Metrics
 	adress string
 }
 
 func GetApi(c *usecase.Core, l *slog.Logger, cfg *configs.CommentCfg) *API {
-
+	
 	api := &API{
 		core:   c,
 		lg:     l.With("module", "api"),
 		mx:     http.NewServeMux(),
-		mt:     metrics.GetMetrics(),
 		adress: cfg.ServerAdress,
 	}
 
 	api.mx.Handle("/metrics", promhttp.Handler())
-	api.mx.Handle("/api/v1/comment", middleware.CollectMetrics(http.HandlerFunc(api.Comment), api.lg, api.mt))
-	api.mx.Handle("/api/v1/comment/add", middleware.CollectMetrics(http.HandlerFunc(api.AddComment), api.lg, api.mt))
+	api.mx.HandleFunc("/api/v1/comment", api.Comment)
+	api.mx.HandleFunc("/api/v1/comment/add", api.AddComment)
 
 	return api
 }
@@ -50,19 +46,17 @@ func (a *API) ListenAndServe() {
 func (a *API) Comment(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
-
+		
 		response.Status = http.StatusMethodNotAllowed
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 
 	filmId, err := strconv.ParseUint(r.URL.Query().Get("film_id"), 10, 64)
 	if err != nil {
-
+		
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 	page, err := strconv.ParseUint(r.URL.Query().Get("page"), 10, 64)
@@ -77,54 +71,49 @@ func (a *API) Comment(w http.ResponseWriter, r *http.Request) {
 	comments, err := a.core.GetFilmComments(filmId, (page-1)*pageSize, pageSize)
 	if err != nil {
 		a.lg.Error("Comment", "err", err.Error())
-
+		
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 
 	commentsResponse := requests.CommentResponse{Comments: comments}
 
+	
 	response.Body = commentsResponse
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+    requests.SendResponse(w, response, a.lg)
 }
 
 func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodPost {
-
+		
 		response.Status = http.StatusMethodNotAllowed
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 
 	session, err := r.Cookie("session_id")
 	if err == http.ErrNoCookie {
-
+		
 		response.Status = http.StatusUnauthorized
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 	if err != nil {
 		a.lg.Error("Add comment error", "err", err.Error())
-
+		
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 
 	userId, err := a.core.GetUserId(r.Context(), session.Value)
 	if err != nil {
 		a.lg.Error("Add comment error", "err", err.Error())
-
+		
 		response.Status = http.StatusInternalServerError
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 
@@ -132,18 +121,16 @@ func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-
+		
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 
 	if err = json.Unmarshal(body, &commentRequest); err != nil {
-
+		
 		response.Status = http.StatusBadRequest
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
 
@@ -153,12 +140,10 @@ func (a *API) AddComment(w http.ResponseWriter, r *http.Request) {
 		response.Status = http.StatusInternalServerError
 	}
 	if found {
-
+		
 		response.Status = http.StatusNotAcceptable
-		/* trunk-ignore(golangci-lint/staticcheck) */
-		r = requests.SendResponse(r, w, response, a.lg)
+		requests.SendResponse(w, response, a.lg)
 		return
 	}
-	/* trunk-ignore(golangci-lint/staticcheck) */
-	r = requests.SendResponse(r, w, response, a.lg)
+    requests.SendResponse(w, response, a.lg)
 }
