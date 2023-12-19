@@ -1,6 +1,7 @@
 package requests
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -68,17 +69,26 @@ type CalendarResponse struct {
 	Days       []models.DayItem `json:"days"`
 }
 
-func SendResponse(w http.ResponseWriter, response Response, lg *slog.Logger) {
+type contextKey string
+
+const StatusKey contextKey = "status"
+
+func SendResponse(r *http.Request, w http.ResponseWriter, response Response, lg *slog.Logger) *http.Request {
 	jsonResponse, err := json.Marshal(response)
+	r = r.WithContext(context.WithValue(r.Context(), StatusKey, response.Status))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
+		r = r.WithContext(context.WithValue(r.Context(), StatusKey, http.StatusInternalServerError))
 		lg.Error("failed to pack json", "err", err.Error())
-		return
+		return r
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_, err = w.Write(jsonResponse)
 	if err != nil {
 		lg.Error("failed to send response", "err", err.Error())
+		r = r.WithContext(context.WithValue(r.Context(), StatusKey, http.StatusInternalServerError))
+		return r
 	}
+	return r
 }

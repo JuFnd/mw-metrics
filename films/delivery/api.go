@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/configs"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/films/usecase"
+	"github.com/go-park-mail-ru/2023_2_Vkladyshi/metrics"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/middleware"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/pkg/models"
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/pkg/requests"
@@ -22,6 +23,7 @@ type API struct {
 	core   usecase.ICore
 	lg     *slog.Logger
 	mx     *http.ServeMux
+	mt     *metrics.Metrics
 	adress string
 }
 
@@ -30,24 +32,25 @@ func GetApi(c *usecase.Core, l *slog.Logger, cfg *configs.DbDsnCfg) *API {
 		core:   c,
 		lg:     l.With("module", "api"),
 		mx:     http.NewServeMux(),
+		mt:     metrics.GetMetrics(),
 		adress: cfg.ServerAdress,
 	}
 
 	api.mx.Handle("/metrics", promhttp.Handler())
-	api.mx.HandleFunc("/api/v1/films", api.Films)
-	api.mx.HandleFunc("/api/v1/film", api.Film)
-	api.mx.HandleFunc("/api/v1/actor", api.Actor)
-	api.mx.Handle("/api/v1/favorite/films", middleware.AuthCheck(http.HandlerFunc(api.FavoriteFilms), c, l))
-	api.mx.Handle("/api/v1/favorite/film/add", middleware.AuthCheck(http.HandlerFunc(api.FavoriteFilmsAdd), c, l))
-	api.mx.Handle("/api/v1/favorite/film/remove", middleware.AuthCheck(http.HandlerFunc(api.FavoriteFilmsRemove), c, l))
-	api.mx.Handle("/api/v1/favorite/actors", middleware.AuthCheck(http.HandlerFunc(api.FavoriteActors), c, l))
-	api.mx.Handle("/api/v1/favorite/actor/add", middleware.AuthCheck(http.HandlerFunc(api.FavoriteActorsAdd), c, l))
-	api.mx.Handle("/api/v1/favorite/actor/remove", middleware.AuthCheck(http.HandlerFunc(api.FavoriteActorsRemove), c, l))
-	api.mx.HandleFunc("/api/v1/find", api.FindFilm)
-	api.mx.HandleFunc("/api/v1/search/actor", api.FindActor)
-	api.mx.HandleFunc("/api/v1/calendar", api.Calendar)
-	api.mx.Handle("/api/v1/rating/add", middleware.AuthCheck(http.HandlerFunc(api.AddRating), c, l))
-	api.mx.HandleFunc("/api/v1/add/film", api.AddFilm)
+	api.mx.Handle("/api/v1/films", middleware.CollectMetrics(http.HandlerFunc(api.Films), api.lg, api.mt))
+	api.mx.Handle("/api/v1/film", middleware.CollectMetrics(http.HandlerFunc(api.Film), api.lg, api.mt))
+	api.mx.Handle("/api/v1/actor", middleware.CollectMetrics(http.HandlerFunc(api.Actor), api.lg, api.mt))
+	api.mx.Handle("/api/v1/favorite/films", middleware.AuthCheck(http.HandlerFunc(api.FavoriteFilms), c, l, api.mt))
+	api.mx.Handle("/api/v1/favorite/film/add", middleware.AuthCheck(http.HandlerFunc(api.FavoriteFilmsAdd), c, l, api.mt))
+	api.mx.Handle("/api/v1/favorite/film/remove", middleware.AuthCheck(http.HandlerFunc(api.FavoriteFilmsRemove), c, l, api.mt))
+	api.mx.Handle("/api/v1/favorite/actors", middleware.AuthCheck(http.HandlerFunc(api.FavoriteActors), c, l, api.mt))
+	api.mx.Handle("/api/v1/favorite/actor/add", middleware.AuthCheck(http.HandlerFunc(api.FavoriteActorsAdd), c, l, api.mt))
+	api.mx.Handle("/api/v1/favorite/actor/remove", middleware.AuthCheck(http.HandlerFunc(api.FavoriteActorsRemove), c, l, api.mt))
+	api.mx.Handle("/api/v1/find", middleware.CollectMetrics(http.HandlerFunc(api.FindFilm), api.lg, api.mt))
+	api.mx.Handle("/api/v1/search/actor", middleware.CollectMetrics(http.HandlerFunc(api.FindActor), api.lg, api.mt))
+	api.mx.Handle("/api/v1/calendar", middleware.CollectMetrics(http.HandlerFunc(api.Calendar), api.lg, api.mt))
+	api.mx.Handle("/api/v1/rating/add", middleware.AuthCheck(http.HandlerFunc(api.AddRating), c, l, api.mt))
+	api.mx.Handle("/api/v1/add/film", middleware.CollectMetrics(http.HandlerFunc(api.AddFilm), api.lg, api.mt))
 
 	return api
 }
@@ -64,7 +67,8 @@ func (a *API) Films(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -88,7 +92,8 @@ func (a *API) Films(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("get films error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -100,21 +105,25 @@ func (a *API) Films(w http.ResponseWriter, r *http.Request) {
 		Films:          films,
 	}
 	response.Body = filmsResponse
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) Film(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
 	filmId, err := strconv.ParseUint(r.URL.Query().Get("film_id"), 10, 64)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -122,24 +131,29 @@ func (a *API) Film(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, usecase.ErrNotFound) {
 			response.Status = http.StatusNotFound
-			requests.SendResponse(w, response, a.lg)
+			/* trunk-ignore(golangci-lint/staticcheck) */
+			r = requests.SendResponse(r, w, response, a.lg)
 			return
 		}
 		a.lg.Error("film error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
 	response.Body = film
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) Actor(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -147,7 +161,8 @@ func (a *API) Actor(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("actor error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -155,24 +170,29 @@ func (a *API) Actor(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, usecase.ErrNotFound) {
 			response.Status = http.StatusNotFound
-			requests.SendResponse(w, response, a.lg)
+			/* trunk-ignore(golangci-lint/staticcheck) */
+			r = requests.SendResponse(r, w, response, a.lg)
 			return
 		}
 		a.lg.Error("actor error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
 
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 	response.Body = actor
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FindFilm(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -182,14 +202,16 @@ func (a *API) FindFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("find film error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
 	if err = json.Unmarshal(body, &request); err != nil {
 		a.lg.Error("find film error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -197,13 +219,15 @@ func (a *API) FindFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, usecase.ErrNotFound) {
 			response.Status = http.StatusNotFound
-			requests.SendResponse(w, response, a.lg)
+			/* trunk-ignore(golangci-lint/staticcheck) */
+			r = requests.SendResponse(r, w, response, a.lg)
 			return
 		}
 
 		a.lg.Error("find film error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -212,14 +236,17 @@ func (a *API) FindFilm(w http.ResponseWriter, r *http.Request) {
 		Total: uint64(len((films))),
 	}
 	response.Body = filmsResponse
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FavoriteFilmsAdd(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -228,7 +255,8 @@ func (a *API) FavoriteFilmsAdd(w http.ResponseWriter, r *http.Request) {
 	filmId, err := strconv.ParseUint(r.URL.Query().Get("film_id"), 10, 64)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -236,23 +264,28 @@ func (a *API) FavoriteFilmsAdd(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, usecase.ErrFoundFavorite) {
 			response.Status = http.StatusNotAcceptable
-			requests.SendResponse(w, response, a.lg)
+			/* trunk-ignore(golangci-lint/staticcheck) */
+			r = requests.SendResponse(r, w, response, a.lg)
 			return
 		}
 
 		a.lg.Error("favorite films error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FavoriteFilmsRemove(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -261,7 +294,8 @@ func (a *API) FavoriteFilmsRemove(w http.ResponseWriter, r *http.Request) {
 	filmId, err := strconv.ParseUint(r.URL.Query().Get("film_id"), 10, 64)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -269,17 +303,21 @@ func (a *API) FavoriteFilmsRemove(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("favorite films error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FavoriteFilms(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -299,18 +337,22 @@ func (a *API) FavoriteFilms(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("favorite films error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 	response.Body = films
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) Calendar(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -318,18 +360,22 @@ func (a *API) Calendar(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("calendar error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 	response.Body = calendar
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FindActor(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -339,14 +385,16 @@ func (a *API) FindActor(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("find actor error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
 	if err = json.Unmarshal(body, &request); err != nil {
 		a.lg.Error("find actor error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -354,13 +402,15 @@ func (a *API) FindActor(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, usecase.ErrNotFound) {
 			response.Status = http.StatusNotFound
-			requests.SendResponse(w, response, a.lg)
+			/* trunk-ignore(golangci-lint/staticcheck) */
+			r = requests.SendResponse(r, w, response, a.lg)
 			return
 		}
 
 		a.lg.Error("find actor error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -368,14 +418,17 @@ func (a *API) FindActor(w http.ResponseWriter, r *http.Request) {
 		Actors: actors,
 	}
 	response.Body = actorsResponse
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) AddRating(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -386,13 +439,15 @@ func (a *API) AddRating(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
 	if err = json.Unmarshal(body, &commentRequest); err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -403,17 +458,21 @@ func (a *API) AddRating(w http.ResponseWriter, r *http.Request) {
 	}
 	if found {
 		response.Status = http.StatusNotAcceptable
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodPost {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -421,7 +480,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("add film error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -439,7 +499,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				a.lg.Error("add film error", "err", err.Error())
 				response.Status = http.StatusBadRequest
-				requests.SendResponse(w, response, a.lg)
+				/* trunk-ignore(golangci-lint/staticcheck) */
+				r = requests.SendResponse(r, w, response, a.lg)
 				return
 			}
 			genres = append(genres, genreUint)
@@ -450,7 +511,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("add film error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 	genres = append(genres, genreUint)
@@ -464,7 +526,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				a.lg.Error("add film error", "err", err.Error())
 				response.Status = http.StatusBadRequest
-				requests.SendResponse(w, response, a.lg)
+				/* trunk-ignore(golangci-lint/staticcheck) */
+				r = requests.SendResponse(r, w, response, a.lg)
 				return
 			}
 			actors = append(actors, actorUint)
@@ -475,7 +538,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("add film error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 	actors = append(actors, actorUint)
@@ -485,7 +549,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil && !errors.Is(err, http.ErrMissingFile) {
 		a.lg.Error("add film error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -493,7 +558,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil && handler != nil && poster != nil {
 		a.lg.Error("Post profile error", "err", err.Error())
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -501,7 +567,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("add film error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 	defer filePhoto.Close()
@@ -510,7 +577,8 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("add film error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -526,17 +594,21 @@ func (a *API) AddFilm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("add film error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FavoriteActorsAdd(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -545,7 +617,8 @@ func (a *API) FavoriteActorsAdd(w http.ResponseWriter, r *http.Request) {
 	actorId, err := strconv.ParseUint(r.URL.Query().Get("actor_id"), 10, 64)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -553,22 +626,27 @@ func (a *API) FavoriteActorsAdd(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, usecase.ErrFoundFavorite) {
 			response.Status = http.StatusNotAcceptable
-			requests.SendResponse(w, response, a.lg)
+			/* trunk-ignore(golangci-lint/staticcheck) */
+			r = requests.SendResponse(r, w, response, a.lg)
 			return
 		}
 		a.lg.Error("favorite actors error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FavoriteActorsRemove(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -577,7 +655,8 @@ func (a *API) FavoriteActorsRemove(w http.ResponseWriter, r *http.Request) {
 	actorId, err := strconv.ParseUint(r.URL.Query().Get("actor_id"), 10, 64)
 	if err != nil {
 		response.Status = http.StatusBadRequest
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -585,17 +664,21 @@ func (a *API) FavoriteActorsRemove(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("favorite actors error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
 
 func (a *API) FavoriteActors(w http.ResponseWriter, r *http.Request) {
 	response := requests.Response{Status: http.StatusOK, Body: nil}
 	if r.Method != http.MethodGet {
 		response.Status = http.StatusMethodNotAllowed
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
@@ -614,14 +697,17 @@ func (a *API) FavoriteActors(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.lg.Error("favorite actors error", "err", err.Error())
 		response.Status = http.StatusInternalServerError
-		requests.SendResponse(w, response, a.lg)
+		/* trunk-ignore(golangci-lint/staticcheck) */
+		r = requests.SendResponse(r, w, response, a.lg)
 		return
 	}
 
 	actorsResponse := requests.ActorsResponse{
 		Actors: actors,
 	}
-	
+
 	response.Body = actorsResponse
-    requests.SendResponse(w, response, a.lg)
+
+	/* trunk-ignore(golangci-lint/staticcheck) */
+	r = requests.SendResponse(r, w, response, a.lg)
 }
